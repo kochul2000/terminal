@@ -47,16 +47,26 @@ produces a single run of `hi` with a red foreground.
 
 ### Why the build needs overrides
 
-The stock Windows Terminal build targets a machine with the full IDE and a
-specific SDK. LxTerm only needs `TerminalCore` as a desktop static library, so
-`build.ps1` overrides:
+The stock Windows Terminal build assumes a machine provisioned for the full app.
+LxTerm only needs `TerminalCore` as a desktop static library, so `build.ps1`
+probes for each missing component and overrides only what it has to — a fully
+provisioned machine builds exactly like upstream. It reports which overrides it
+applied.
 
-| Override | Reason |
-| --- | --- |
-| `OpenConsoleUniversalApp=false` | `TerminalCore` builds as a Windows Store lib by default, which requires the UWP C++ workload |
-| `SpectreMitigation=false` | Spectre-mitigated runtime libs are a separate VS component |
-| `WindowsTargetPlatformVersion` / `TargetPlatformVersion` | the repo pins 10.0.22621, which may not be installed |
-| `_CL_=/WX-` (env) | `TreatWarningAsError` is hardcoded in `src\common.build.pre.props` and cannot be overridden with `/p:`; newer MSVC toolsets warn on code the pinned toolset accepted |
+| Override | Applied when | Component that removes it |
+| --- | --- | --- |
+| `WindowsTargetPlatformVersion` / `TargetPlatformVersion` | SDK 10.0.22621 is absent (the repo pins it) | Windows SDK 10.0.22621 |
+| `SpectreMitigation=false` | no `lib\spectre\<platform>` under any MSVC toolset | Spectre-mitigated runtime libraries |
+| `OpenConsoleUniversalApp=false` | no `Application Type\Windows Store\10.0` under the VC targets | UWP C++ workload (v143) |
+
+One override is unconditional: `_CL_=/wd4706`. `TreatWarningAsError` is hardcoded
+in `src\common.build.pre.props` and cannot be overridden with `/p:`, and cl.exe's
+`_CL_` environment variable is the only remaining lever. Upstream CI runs
+`Set-LatestVCToolsVersion.ps1`, so it builds against whatever toolset the hosted
+image ships rather than a pinned one; newer toolsets warn on code older ones
+accepted. As of MSVC 14.44 the only such warning in this dependency graph is
+C4706 in `TerminalSelection.cpp`. Suppressing exactly that — rather than `/WX-` —
+keeps a rebase onto a newer upstream tag failing loudly on anything new.
 
 ## ABI notes
 

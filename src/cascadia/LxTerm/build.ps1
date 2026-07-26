@@ -38,17 +38,22 @@ if (-not (Test-Path $msbuild)) {
     throw "MSBuild.exe not found under $vsRoot."
 }
 
-# Pick the newest installed Windows SDK unless the caller pinned one. The repo
-# pins 10.0.22621, which is not necessarily what is on the machine.
+# src\common.build.pre.props pins this SDK. If it is installed, leave the repo's
+# own configuration alone; otherwise fall back to the newest one present.
+$repoPinnedSdk = '10.0.22621.0'
+$sdkInclude = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Include'
+$sdkPinnedInstalled = Test-Path (Join-Path $sdkInclude $repoPinnedSdk)
 if (-not $WindowsTargetPlatformVersion) {
-    $sdkInclude = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Include'
-    $WindowsTargetPlatformVersion = Get-ChildItem $sdkInclude -Directory |
+    $WindowsTargetPlatformVersion = Get-ChildItem $sdkInclude -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -match '^10\.' } |
         Sort-Object { [version]$_.Name } |
         Select-Object -Last 1 -ExpandProperty Name
     if (-not $WindowsTargetPlatformVersion) {
         throw "No Windows 10/11 SDK found under $sdkInclude."
     }
+} else {
+    # An explicit request wins over the repo's pin.
+    $sdkPinnedInstalled = $false
 }
 
 if (-not $VcpkgRoot) {
@@ -76,28 +81,51 @@ if (-not (Test-Path $wilTargets)) {
 # --- build -----------------------------------------------------------------
 # TreatWarningAsError is hardcoded in src\common.build.pre.props, so it cannot be
 # overridden with /p:. cl.exe honours the _CL_ environment variable by appending
-# it after the command line, which lets /WX- win. Newer MSVC toolsets warn on
-# code the pinned toolset accepted (e.g. C4706 in TerminalSelection.cpp), and we
-# would rather not carry patches to upstream sources.
-$env:_CL_ = '/WX-'
+# it after the command line, which is the only lever left.
+#
+# Upstream CI runs Set-LatestVCToolsVersion.ps1, so it builds with whatever
+# toolset the hosted image ships rather than a pinned one. Newer toolsets warn on
+# code older ones accepted; as of MSVC 14.44 the only such warning in our
+# dependency graph is C4706 (assignment in a conditional) in TerminalSelection.cpp.
+# Suppress exactly that rather than /WX-, so a rebase onto a newer upstream tag
+# still fails loudly on any new warning.
+$env:_CL_ = '/wd4706'
 
 $args = @(
     (Join-Path $PSScriptRoot 'LxTerm.vcxproj')
     "/p:SolutionDir=$repoRoot\"
     "/p:Configuration=$Configuration"
     "/p:Platform=$Platform"
-    # TerminalCore builds as a Windows Store static library by default, which
-    # needs the UWP C++ workload. We only consume it from a desktop DLL.
-    '/p:OpenConsoleUniversalApp=false'
-    # Spectre-mitigated runtime libraries are a separate VS component.
-    '/p:SpectreMitigation=false'
-    "/p:WindowsTargetPlatformVersion=$WindowsTargetPlatformVersion"
-    "/p:TargetPlatformVersion=$WindowsTargetPlatformVersion"
     '/nologo'
     '/v:m'
 )
 
-Write-Host "Building LxTerm ($Configuration|$Platform, SDK $WindowsTargetPlatformVersion)..." -ForegroundColor Cyan
+# Every override below exists only because a VS component is missing. Probe for
+# each one so that a fully provisioned machine builds exactly like upstream does.
+if (-not $sdkPinnedInstalled) {
+    $args += "/p:WindowsTargetPlatformVersion=$WindowsTargetPlatformVersion"
+    $args += "/p:TargetPlatformVersion=$WindowsTargetPlatformVersion"
+    Write-Host "  SDK $repoPinnedSdk not installed; targeting $WindowsTargetPlatformVersion instead." -ForegroundColor Yellow
+}
+
+# Spectre-mitigated runtime libraries ship as a separate VS component.
+$spectreInstalled = [bool](Get-ChildItem (Join-Path $vsRoot 'VC\Tools\MSVC') -Directory -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path (Join-Path $_.FullName "lib\spectre\$Platform") })
+if (-not $spectreInstalled) {
+    $args += '/p:SpectreMitigation=false'
+    Write-Host '  Spectre-mitigated libraries not installed; disabling SpectreMitigation.' -ForegroundColor Yellow
+}
+
+# TerminalCore builds as a Windows Store static library by default, which needs
+# the UWP C++ workload. LxTerm only consumes it from a desktop DLL, so it can be
+# built as a plain desktop library when that workload is absent.
+$storeToolset = Join-Path $vsRoot 'MSBuild\Microsoft\VC\v170\Application Type\Windows Store\10.0'
+if (-not (Test-Path $storeToolset)) {
+    $args += '/p:OpenConsoleUniversalApp=false'
+    Write-Host '  UWP C++ workload not installed; building TerminalCore as a desktop library.' -ForegroundColor Yellow
+}
+
+Write-Host "Building LxTerm ($Configuration|$Platform)..." -ForegroundColor Cyan
 & $msbuild @args
 if ($LASTEXITCODE -ne 0) { throw "Build failed." }
 

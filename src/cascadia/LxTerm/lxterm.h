@@ -47,15 +47,20 @@ typedef struct LxSpan
 } LxSpan;
 
 // A horizontal run of cells sharing one TextAttribute.
+//
+// Runs within a row do not necessarily start at column 0 or cover the row
+// contiguously: a frame reports only what changed, so place each run at its own
+// column. Runs may also overlap when several dirty regions touch one row; later
+// runs win.
 typedef struct LxRun
 {
     LxSpan text; // glyphs, UTF-8
+    uint16_t col; // starting column
     uint16_t cols; // columns covered (wide glyphs count 2)
     uint16_t flags; // LXTERM_FLAG_*
+    uint16_t hyperlink_id; // 0 = none
     uint32_t fg; // 0x00RRGGBB, already resolved through the color scheme
     uint32_t bg; // 0x00RRGGBB
-    uint16_t hyperlink_id; // 0 = none
-    uint16_t _pad;
 } LxRun;
 
 // One buffer row's worth of runs, indexing into LxFrame::runs_ptr.
@@ -80,7 +85,9 @@ typedef struct LxFrame
     uint8_t cursor_visible;
     uint8_t cursor_style;
     uint8_t alt_buffer_active;
-    uint8_t _pad;
+    // 1 when the rows below are the whole viewport rather than a delta, so a
+    // consumer holding a mirror of the screen should drop what it has first.
+    uint8_t full_repaint;
     const LxRow* rows_ptr;
     uint32_t rows_len;
     const LxRun* runs_ptr;
@@ -97,7 +104,9 @@ LXTERM_API void lxterm_destroy(LxTerm* term);
 // remaining bytes arrive.
 LXTERM_API void lxterm_write(LxTerm* term, const uint8_t* utf8, size_t len);
 
-// Renders the current state. Never returns NULL for a valid handle.
+// Renders whatever changed since the last call. Never returns NULL for a valid
+// handle; when nothing changed, rows_len is 0 and the rest of the frame still
+// describes the current state.
 LXTERM_API const LxFrame* lxterm_take_frame(LxTerm* term);
 
 #ifdef __cplusplus

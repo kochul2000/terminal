@@ -18,12 +18,14 @@
   <Import Project="$(OpenConsoleDir)src\cppwinrt.build.pre.props" />
 
   <ItemGroup>
+    <ClCompile Include="LxEngine.cpp" />
     <ClCompile Include="lxterm.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="LxEngine.h" />
     <ClInclude Include="lxterm.h" />
     <ClInclude Include="pch.h" />
   </ItemGroup>

@@ -13,10 +13,14 @@ modified, so tracking new upstream release tags stays a rebase with no conflicts
 
 ## Status
 
-P0 spike. `lxterm_create` / `lxterm_write` / `lxterm_take_frame` / `lxterm_destroy`
-work; frames are read straight off the `TextBuffer` and every viewport row is
-reported every time. Dirty tracking, input, resize and the event channel are
-tracked as separate issues.
+`lxterm_create` / `lxterm_write` / `lxterm_take_frame` / `lxterm_destroy` work,
+and frames are deltas: `LxEngine` implements `IRenderEngine`, so the Renderer
+hands it the same dirty regions, resolved attributes and glyph clusters an
+on-screen backend gets. Writing one glyph to an 80x25 terminal produces a frame
+of one row, one run, one byte.
+
+Input, resize, the event channel and alt-buffer state are tracked as separate
+issues.
 
 ## Building
 
@@ -76,6 +80,17 @@ keeps a rebase onto a newer upstream tag failing loudly on anything new.
   upstream, so runs fall out naturally and cut the payload by one to two orders
   of magnitude — which matters because the same frames go over the wire to
   laymux's remote sessions.
+- A frame is a **delta**. Only rows the Renderer marked dirty appear, runs within
+  a row start at `LxRun::col` rather than covering it contiguously, and runs may
+  overlap when several dirty regions touch one row — later runs win. When
+  `full_repaint` is set the rows are the whole viewport, so a consumer holding a
+  mirror should drop it first. Scrolling sets `full_repaint`.
+- Rows are numbered in **absolute buffer coordinates**, not viewport rows, so a
+  consumer can follow scrolling from `view_top` without reindexing what it holds.
+- The cursor is a coordinate on the frame, not ink in a cell. `LxEngine` therefore
+  ignores cursor invalidation for content purposes and only treats an actual move
+  as a reason to produce a frame; an idle `lxterm_take_frame` returns
+  `rows_len == 0`.
 - Colors are resolved to `0x00RRGGBB` on this side of the ABI, via
   `IRenderData::GetAttributeColors`.
 - `lxterm_write` holds incomplete UTF-8 sequences internally, so callers can pass

@@ -22,10 +22,19 @@ tracked as separate issues.
 
 ```powershell
 $env:VCPKG_ROOT = 'D:\vcpkg'
-pwsh src\cascadia\LxTerm\build.ps1
+powershell -File src\cascadia\LxTerm\build.ps1
 ```
 
 Output: `bin\x64\Release\LxTerm\laymux_wt.dll`.
+
+## Testing
+
+```powershell
+powershell -File src\cascadia\LxTerm\test\run.ps1
+```
+
+Compiles `test\smoke.c` against the built DLL and asserts that `\x1b[31mhi`
+produces a single run of `hi` with a red foreground.
 
 ### Requirements
 

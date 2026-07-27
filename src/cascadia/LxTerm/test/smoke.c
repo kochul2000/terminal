@@ -152,7 +152,47 @@ int main(void)
         check(minRow >= f->view_top, "reported rows are absolute buffer rows inside the viewport");
     }
 
+    /* --- scrolling back up moves the viewport without touching the buffer --- */
+    lxterm_user_scroll(t, 0);
+    f = lxterm_take_frame(t);
+    printf("--- frame 5: scrolled to the top ---\n");
+    dump_frame(f, 0);
+    check(f->view_top == 0, "user scroll moved the viewport to the top");
+    check(f->buffer_rows == 1025, "user scroll did not change the buffer");
+    check(f->cursor_y == 40, "cursor stayed on its buffer row while the view scrolled");
+    check(f->cursor_visible == 0, "cursor scrolled out of view is not visible");
+
+    /* --- resize reflows and repaints --- */
+    lxterm_resize(t, 100, 30);
+    f = lxterm_take_frame(t);
+    printf("--- frame 6: resized to 100x30 ---\n");
+    dump_frame(f, 0);
+    check(f->cols == 100 && f->rows == 30, "frame reports the new viewport");
+    check(f->full_repaint == 1, "resize forces a full repaint");
+    check(f->rows_len == 30, "resize repaints every visible row");
+    check(f->buffer_rows == 1030, "buffer height follows the viewport");
+
+    /* --- alternate buffer --- */
+    write_str(t, "\x1b[?1049h");
+    f = lxterm_take_frame(t);
+    printf("--- frame 7: alternate buffer ---\n");
+    dump_frame(f, 0);
+    check(f->alt_buffer_active == 1, "alternate buffer is reported");
+    check(f->buffer_rows == 30, "alternate buffer has no scrollback");
+    check(f->view_top == 0, "alternate buffer viewport starts at row 0");
+
+    write_str(t, "\x1b[?1049l");
+    f = lxterm_take_frame(t);
+    printf("--- frame 8: back to the main buffer ---\n");
+    dump_frame(f, 0);
+    check(f->alt_buffer_active == 0, "main buffer is reported again");
+    check(f->buffer_rows == 1030, "scrollback survived the alternate buffer");
+
     lxterm_destroy(t);
+
+    /* --- scrollback is required, so that alt_buffer_active can be derived --- */
+    check(lxterm_create(80, 25, 0) == NULL, "create rejects a zero scrollback");
+
     if (failures == 0)
     {
         printf("PASS\n");

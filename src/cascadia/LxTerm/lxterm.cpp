@@ -24,6 +24,7 @@ struct LxTerm
     til::u8state u8state;
     std::wstring wide;
     uint64_t seq{ 0 };
+    til::CoordType scrollback{ 0 };
 
     // Handed back by lxterm_take_frame; the arrays it points at live in the engine.
     LxFrame frame{};
@@ -32,12 +33,13 @@ struct LxTerm
 LxTerm* lxterm_create(int32_t cols, int32_t rows, int32_t scrollback)
 try
 {
-    if (cols <= 0 || rows <= 0 || scrollback < 0)
+    if (cols <= 0 || rows <= 0 || scrollback < 1)
     {
         return nullptr;
     }
 
     auto term = std::make_unique<LxTerm>();
+    term->scrollback = scrollback;
 
     // Deliberately no EnablePainting(): that spawns a render thread that would
     // call PaintFrame on its own schedule. Frames here are pulled, not pushed, so
@@ -81,6 +83,36 @@ catch (...)
 {
 }
 
+void lxterm_resize(LxTerm* term, int32_t cols, int32_t rows)
+try
+{
+    if (!term || cols <= 0 || rows <= 0)
+    {
+        return;
+    }
+
+    const auto lock = term->terminal.LockForWriting();
+    LOG_IF_FAILED(term->terminal.UserResize({ cols, rows }));
+}
+catch (...)
+{
+}
+
+void lxterm_user_scroll(LxTerm* term, int32_t view_top)
+try
+{
+    if (!term)
+    {
+        return;
+    }
+
+    const auto lock = term->terminal.LockForWriting();
+    term->terminal.UserScrollViewport(view_top);
+}
+catch (...)
+{
+}
+
 const LxFrame* lxterm_take_frame(LxTerm* term)
 try
 {
@@ -96,20 +128,34 @@ try
     const auto& engine = term->engine;
     const auto viewportSize = engine.ViewportSize();
     const auto viewportTop = engine.ViewportTop();
-    const auto& cursor = engine.Cursor();
+
+    auto& buffer = term->terminal.GetTextBuffer();
+    const auto bufferRows = buffer.TotalRowCount();
+
+    // Straight from the buffer rather than from the engine: the Renderer does not
+    // call PaintCursor while the cursor is scrolled out of view, so the engine's
+    // copy would be whatever it was when the cursor was last visible.
+    const auto& cursor = buffer.GetCursor();
+    const auto cursorPos = cursor.GetPosition();
+    const auto cursorInView = cursorPos.y >= viewportTop && cursorPos.y < viewportTop + viewportSize.height;
+
+    // Terminal keeps _inAltBuffer() private, and the alternate buffer is the one
+    // observable thing that has no scrollback: it is allocated at exactly the
+    // viewport size. That is why lxterm_create insists on a scrollback of at least
+    // one -- without it the two buffers are indistinguishable from out here.
+    const auto inAltBuffer = bufferRows == viewportSize.height;
 
     auto& frame = term->frame;
     frame.seq = ++term->seq;
     frame.cols = viewportSize.width;
     frame.rows = viewportSize.height;
     frame.view_top = viewportTop;
-    frame.buffer_rows = term->terminal.GetTextBuffer().TotalRowCount();
-    // CursorOptions is viewport-relative; the ABI reports absolute buffer rows.
-    frame.cursor_x = cursor.coordCursor.x;
-    frame.cursor_y = cursor.coordCursor.y + viewportTop;
-    frame.cursor_visible = (cursor.isVisible && cursor.inViewport) ? 1u : 0u;
-    frame.cursor_style = gsl::narrow_cast<uint8_t>(cursor.cursorType);
-    frame.alt_buffer_active = 0; // TODO(#10): plumb alt-buffer state out of Terminal
+    frame.buffer_rows = bufferRows;
+    frame.cursor_x = cursorPos.x;
+    frame.cursor_y = cursorPos.y;
+    frame.cursor_visible = (cursor.IsVisible() && cursorInView) ? 1u : 0u;
+    frame.cursor_style = gsl::narrow_cast<uint8_t>(cursor.GetType());
+    frame.alt_buffer_active = inAltBuffer ? 1u : 0u;
     frame.full_repaint = engine.FullRepaint() ? 1u : 0u;
 
     if (engine.Painted())

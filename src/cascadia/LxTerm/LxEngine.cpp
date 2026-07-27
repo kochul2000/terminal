@@ -293,6 +293,10 @@ CATCH_RETURN()
 
 [[nodiscard]] HRESULT LxEngine::PaintCursor(const CursorOptions& options) noexcept
 {
+    // Recorded for the cursor's rendering options (color, height, double width),
+    // none of which the ABI carries yet. The position does NOT come from here: the
+    // Renderer skips this call entirely when the cursor is outside the viewport,
+    // which would leave a stale position behind after a scroll.
     _cursor = options;
     return S_OK;
 }
@@ -351,7 +355,16 @@ CATCH_RETURN()
 
 [[nodiscard]] HRESULT LxEngine::UpdateViewport(const til::inclusive_rect& srNewViewport) noexcept
 {
+    // A resize keeps the viewport's origin, so the Renderer's InvalidateScroll
+    // gets a zero delta and nothing would be marked dirty. Catch it here: any
+    // change in the visible dimensions invalidates everything we last reported.
+    const auto resized = (srNewViewport.right - srNewViewport.left) != (_viewport.right - _viewport.left) ||
+                         (srNewViewport.bottom - srNewViewport.top) != (_viewport.bottom - _viewport.top);
     _viewport = srNewViewport;
+    if (resized)
+    {
+        return InvalidateAll();
+    }
     return S_OK;
 }
 

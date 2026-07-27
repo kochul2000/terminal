@@ -96,13 +96,22 @@ typedef struct LxFrame
     uint32_t utf8_len;
 } LxFrame;
 
-// Returns NULL on failure.
+// Returns NULL on failure. scrollback must be at least 1: with no scrollback the
+// main and alternate buffers are the same size, and alt_buffer_active is derived
+// from that difference.
 LXTERM_API LxTerm* lxterm_create(int32_t cols, int32_t rows, int32_t scrollback);
 LXTERM_API void lxterm_destroy(LxTerm* term);
 
 // Feeds PTY output. Incomplete UTF-8 sequences are held internally until the
 // remaining bytes arrive.
 LXTERM_API void lxterm_write(LxTerm* term, const uint8_t* utf8, size_t len);
+
+// Resizes the viewport. The main buffer reflows; the next frame is a full repaint.
+LXTERM_API void lxterm_resize(LxTerm* term, int32_t cols, int32_t rows);
+
+// Scrolls the viewport so that view_top is the topmost visible buffer row. It is
+// clamped to the buffer, and has no effect while the alternate buffer is active.
+LXTERM_API void lxterm_user_scroll(LxTerm* term, int32_t view_top);
 
 // Renders whatever changed since the last call. Never returns NULL for a valid
 // handle; when nothing changed, rows_len is 0 and the rest of the frame still

@@ -13,14 +13,15 @@ modified, so tracking new upstream release tags stays a rebase with no conflicts
 
 ## Status
 
-`lxterm_create` / `lxterm_write` / `lxterm_take_frame` / `lxterm_destroy` work,
+`lxterm_create` / `lxterm_write` / `lxterm_resize` / `lxterm_user_scroll` /
+`lxterm_take_frame` / `lxterm_destroy` work,
 and frames are deltas: `LxEngine` implements `IRenderEngine`, so the Renderer
 hands it the same dirty regions, resolved attributes and glyph clusters an
 on-screen backend gets. Writing one glyph to an 80x25 terminal produces a frame
 of one row, one run, one byte.
 
-Input, resize, the event channel and alt-buffer state are tracked as separate
-issues.
+Input and the event channel (title, bell, OSC, and the responses a terminal owes
+the application) are tracked as separate issues.
 
 ## Building
 
@@ -90,7 +91,13 @@ keeps a rebase onto a newer upstream tag failing loudly on anything new.
 - The cursor is a coordinate on the frame, not ink in a cell. `LxEngine` therefore
   ignores cursor invalidation for content purposes and only treats an actual move
   as a reason to produce a frame; an idle `lxterm_take_frame` returns
-  `rows_len == 0`.
+  `rows_len == 0`. The position is read from the text buffer rather than from
+  `PaintCursor`, which the Renderer skips while the cursor is scrolled out of view.
+- `alt_buffer_active` is derived, not reported: `Terminal::_inAltBuffer()` is
+  private, and the alternate buffer's distinguishing trait from out here is that
+  it is allocated at exactly the viewport size with no scrollback. That is why
+  `lxterm_create` requires a scrollback of at least 1 — at zero the two buffers
+  are the same size and indistinguishable.
 - Colors are resolved to `0x00RRGGBB` on this side of the ABI, via
   `IRenderData::GetAttributeColors`.
 - `lxterm_write` holds incomplete UTF-8 sequences internally, so callers can pass

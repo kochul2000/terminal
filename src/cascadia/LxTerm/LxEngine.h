@@ -35,7 +35,6 @@ namespace laymux
         til::CoordType ViewportTop() const noexcept { return _viewport.top; }
         til::size ViewportSize() const noexcept;
 
-        const Microsoft::Console::Render::CursorOptions& Cursor() const noexcept { return _cursor; }
         std::wstring_view Title() const noexcept { return _title; }
 
         // IRenderEngine
